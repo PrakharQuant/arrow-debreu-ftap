@@ -76,12 +76,55 @@
     return { q, m, Rf, piStar };
   };
 
+  function erf(x) {
+    const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741, a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
+    const sign = x < 0 ? -1 : 1;
+    x = Math.abs(x);
+    const t = 1 / (1 + p * x);
+    const y = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
+    return sign * y;
+  }
+  function normCdf(x) { return 0.5 * (1 + erf(x / Math.SQRT2)); }
+  function normInv(p) {
+    if (p <= 0 || p >= 1) return p <= 0 ? -Infinity : Infinity;
+    const a = [2.50662823884, -18.61500062529, 41.39119773534, -25.44106049637];
+    const b = [-8.47351093090, 23.08336743743, -21.06224101826, 3.13082909833];
+    const c = [0.3374754822726147, 0.9761690190917186, 0.1607979326751164, 0.0276438810333863, 0.0038405729373609, 0.0003951896511919, 0.0000321767881768, 0.0000002888167364, 0.0000003960315187];
+    if (p < 0.02425 || p > 1 - 0.02425) {
+      const q = p < 0.5 ? p : 1 - p;
+      const r = Math.sqrt(-2 * Math.log(q));
+      let x = (((((c[8] * r + c[7]) * r + c[6]) * r + c[5]) * r + c[4]) * r + c[3]) * r + c[2];
+      x = (x * r + c[1]) * r + c[0];
+      return p < 0.5 ? -x : x;
+    }
+    const q = p - 0.5;
+    const r = q * q;
+    return (((((a[3] * r + a[2]) * r + a[1]) * r + a[0]) * r) / ((((b[3] * r + b[2]) * r + b[1]) * r + b[0]) * r + 1)) * q;
+  }
+
   AD.blackScholesCall = function (S0, K, r, sigma, T) {
     if (T <= 0) return Math.max(S0 - K, 0);
     const d1 = (Math.log(S0 / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * Math.sqrt(T));
     const d2 = d1 - sigma * Math.sqrt(T);
-    const normCdf = x => 0.5 * (1 + Math.erf(x / Math.SQRT2));
     return S0 * normCdf(d1) - K * Math.exp(-r * T) * normCdf(d2);
+  };
+
+  AD.discretizeLognormal = function (N, S0, mu, sigma, r, T) {
+    if (!isFinite(N) || N > 500) N = 200;
+    const states = [], pi = [], m = [], q = [];
+    const lambda = (mu - r) / sigma;
+    for (let i = 0; i < N; i++) {
+      const z = normInv((i + 0.5) / N);
+      const ST = S0 * Math.exp((mu - 0.5 * sigma * sigma) * T + sigma * Math.sqrt(T) * z);
+      states.push(ST);
+      pi.push(1 / N);
+      const ms = Math.exp(-r * T) * Math.exp(-lambda * Math.sqrt(T) * z - 0.5 * lambda * lambda * T);
+      m.push(ms);
+      q.push((1 / N) * ms);
+    }
+    const callPay = states.map(s => Math.max(s - 100, 0));
+    const callPrice = AD.priceByQ(q, callPay);
+    return { states, pi, q, m, callPrice };
   };
 
   AD.selfTest = function () {
@@ -101,6 +144,7 @@
     return (...args) => { cancelAnimationFrame(id); id = requestAnimationFrame(() => fn(...args)); };
   }
   function fmt(n, d = 4) { return Number(n).toFixed(d); }
+  function fmt6(n) { return Number(n).toFixed(6); }
 
   document.addEventListener("DOMContentLoaded", () => {
     const saved = localStorage.getItem("ad-theme");
@@ -148,7 +192,29 @@
     ["m1-ws", "m1-wb", "m1-ps", "m1-pb"].forEach(id => document.getElementById(id)?.addEventListener("input", update1));
     update1();
 
-    // Module 3 quick init
+    // Module 2 (basic)
+    const update2 = debounce(() => {
+      const target = document.getElementById("m2-target").value === "boom" ? [1, 0] : [0, 1];
+      const w = [+document.getElementById("m2-ws").value, +document.getElementById("m2-wb").value];
+      const X = [[120, 100], [60, 100]];
+      const pay = AD.portfolioPayoff(X, w);
+      const dist = Math.hypot(pay[0] - target[0], pay[1] - target[1]);
+      document.getElementById("m2-out").innerHTML = `<p>Payoff: (${fmt(pay[0])}, ${fmt(pay[1])}) — distance: ${fmt(dist, 4)}</p>`;
+    });
+    ["m2-target", "m2-ws", "m2-wb"].forEach(id => document.getElementById(id)?.addEventListener("input", update2));
+    document.getElementById("m2-auto")?.addEventListener("click", () => {
+      const target = document.getElementById("m2-target").value === "boom" ? [1, 0] : [0, 1];
+      const X = [[120, 100], [60, 100]];
+      const rep = AD.replicate(X, target);
+      if (rep) {
+        document.getElementById("m2-ws").value = rep.w[0];
+        document.getElementById("m2-wb").value = rep.w[1];
+        update2();
+      }
+    });
+    update2();
+
+    // Module 3
     const update3 = debounce(() => {
       const pi = +document.getElementById("m3-pi").value;
       const gamma = +document.getElementById("m3-gamma").value;
@@ -167,6 +233,67 @@
     });
     ["m3-pi", "m3-gamma", "m3-beta", "m3-cb", "m3-cr"].forEach(id => document.getElementById(id)?.addEventListener("input", update3));
     update3();
+
+    // Module 4 — 3D state space
+    let hasPut = false;
+    const update4 = debounce(() => {
+      const Xbase = [[130, 100], [100, 100], [50, 100]];
+      const pbase = [90, 95];
+      const info = AD.solveStatePrices(Xbase, pbase);
+      const interval = info.qInterval || { min: [0, 0, 0.1], max: [0, 0, 0.42] };
+      const putLow = 30 * interval.min[2];
+      const putHigh = 30 * interval.max[2];
+      document.getElementById("m4-out").innerHTML = `<p>No-arbitrage interval for Put (0,0,30): [${fmt(putLow, 2)}, ${fmt(putHigh, 2)}]</p>
+        <p>Status: ${info.status} (degrees of freedom = ${info.degreesOfFreedom})</p>`;
+
+      if (window.Plotly) {
+        const traces = [
+          { x: [0, 130], y: [0, 100], z: [0, 50], mode: "lines+markers", type: "scatter3d", name: "Stock" },
+          { x: [0, 100], y: [0, 100], z: [0, 100], mode: "lines+markers", type: "scatter3d", name: "Bond" },
+          { x: [0, 0], y: [0, 0], z: [0, 1], mode: "lines", type: "scatter3d", name: "Crash claim", line: { dash: "dot" } }
+        ];
+        if (hasPut) {
+          traces.push({ x: [0, 0], y: [0, 0], z: [0, 30], mode: "lines+markers", type: "scatter3d", name: "Put" });
+        }
+        Plotly.react("m4-chart", traces, {
+          title: "3D State Space (Boom / Stagnation / Crash)",
+          scene: { xaxis: { title: "Boom" }, yaxis: { title: "Stagnation" }, zaxis: { title: "Crash" } },
+          paper_bgcolor: "transparent",
+          font: { color: getComputedStyle(document.documentElement).getPropertyValue("--fg") || "#e8eaed" }
+        }, { responsive: true });
+      }
+    });
+    document.getElementById("m4-put")?.addEventListener("click", () => {
+      hasPut = !hasPut;
+      document.getElementById("m4-put").textContent = hasPut ? "− Remove Put" : "+ Introduce Put (K=80)";
+      update4();
+    });
+    update4();
+
+    // Module 5 — discrete to continuous
+    const update5 = debounce(() => {
+      const sel = document.getElementById("m5-n");
+      const N = sel.value === "∞" ? 200 : +sel.value;
+      const disc = AD.discretizeLognormal(N, 100, 0.08, 0.20, 0.03, 1);
+      const bs = AD.blackScholesCall(100, 100, 0.03, 0.20, 1);
+      const err = Math.abs(disc.callPrice - bs);
+      document.getElementById("m5-out").innerHTML = `<p>Discrete call price (N=${N}): ${fmt6(disc.callPrice)} &nbsp; Black-Scholes: ${fmt6(bs)} &nbsp; |error| = ${fmt6(err)}</p>`;
+
+      if (window.Plotly) {
+        Plotly.react("m5-chart", [
+          { x: disc.states, y: disc.q, type: "bar", name: "q_s (state prices)" },
+          { x: disc.states, y: disc.pi.map(p => p * 0.05), type: "scatter", mode: "lines", name: "scaled π" }
+        ], {
+          title: "Discretized state prices → continuous density",
+          xaxis: { title: "S_T" },
+          paper_bgcolor: "transparent",
+          plot_bgcolor: "transparent",
+          font: { color: getComputedStyle(document.documentElement).getPropertyValue("--fg") || "#e8eaed" }
+        }, { responsive: true });
+      }
+    });
+    document.getElementById("m5-n")?.addEventListener("change", update5);
+    update5();
 
     // Module 6
     document.getElementById("m6-out").innerHTML = `<p><strong>Arbitrage-free?</strong> <span class="badge success">Yes</span> (canonical market)</p><p><strong>Complete?</strong> <span class="badge warning">No</span> (3 states, 2 assets)</p><p>FTAP: No arbitrage ⇔ ∃ strictly positive state-price vector. Completeness ⇔ that vector is unique.</p>`;
