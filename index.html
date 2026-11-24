@@ -1,1 +1,168 @@
-FULL_HTML_PLACEHOLDER
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Arrow-Debreu Securities & the Fundamental Theorem of Asset Pricing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;550;650&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
+  <link rel="stylesheet" href="style.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" integrity="sha384-XjKyOOlGwcjNTAIQHIpgOno0Hl1YQqzUOEleOLALmuqehneUG+vnGctmUb0ZY0l8" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" integrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05" crossorigin="anonymous"></script>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <h1>Arrow-Debreu & FTAP</h1>
+      <nav>
+        <button class="nav-btn" onclick="document.getElementById('m1').scrollIntoView()">1. Spaces</button>
+        <button class="nav-btn" onclick="document.getElementById('m2').scrollIntoView()">2. Replication</button>
+        <button class="nav-btn" onclick="document.getElementById('m3').scrollIntoView()">3. Probabilities</button>
+        <button class="nav-btn" onclick="document.getElementById('m4').scrollIntoView()">4. Completeness</button>
+        <button class="nav-btn" onclick="document.getElementById('m5').scrollIntoView()">5. Continuous</button>
+        <button class="nav-btn" onclick="document.getElementById('m6').scrollIntoView()">6. FTAP</button>
+        <button class="nav-btn" id="notation-btn">Notation</button>
+        <button class="theme-toggle" id="theme-toggle">🌙 Dark</button>
+      </nav>
+    </div>
+  </header>
+
+  <div id="notation-drawer">
+    <h3>Notation</h3>
+    <p><strong>X</strong>: S×A payoff matrix (rows = states)</p>
+    <p><strong>p</strong>: asset prices</p>
+    <p><strong>q_s</strong>: state price (today's price of 1 unit in state s)</p>
+    <p><strong>m_s = q_s / π_s</strong>: stochastic discount factor</p>
+    <p><strong>π*_s = R_f · q_s</strong>: risk-neutral probability</p>
+    <p><strong>R_f = 1 / Σ q_s</strong></p>
+    <p>Arrow-Debreu securities: contingent claims on a commodity. Arrow securities: pay one unit of the numeraire in one state. We mostly use the latter.</p>
+  </div>
+
+  <main>
+    <section class="module" id="m1">
+      <h2>Module 1: Asset space vs. state space</h2>
+      <div class="predict">
+        <strong>Predict:</strong> If you buy 1 stock and short 1 bond, where does the portfolio vector land in state space?
+        <button onclick="alert('It lands at (20, -40). The cost is 90-95 = -5.')">Show answer</button>
+      </div>
+      <div class="split">
+        <div class="controls">
+          <label>Shares of Stock w_S <input type="range" id="m1-ws" min="-3" max="3" step="0.05" value="1"></label>
+          <label>Shares of Bond w_B <input type="range" id="m1-wb" min="-3" max="3" step="0.05" value="0"></label>
+          <label>Price of Stock p_S <input type="number" id="m1-ps" value="90" step="1"></label>
+          <label>Price of Bond p_B <input type="number" id="m1-pb" value="95" step="1"></label>
+        </div>
+        <div id="m1-chart" class="chart"></div>
+      </div>
+      <div id="m1-table"></div>
+      <div id="m1-alert" class="hidden"></div>
+      <details>
+        <summary>But Why? Why flip the axes to states?</summary>
+        <div>In asset space we think in quantities of stock and bond. In state space each point is a payoff pair (Boom, Recession). A stock is just a bundle of state-contingent claims. The tip-to-tail construction is ordinary vector addition: the portfolio payoff is the linear combination w_S · S + w_B · B. This geometry makes completeness and arbitrage visually immediate.</div>
+      </details>
+      <div class="self-check">
+        <div class="q"><strong>Self-check:</strong> What is the cost of the portfolio that pays exactly (1,0)?</div>
+        <button onclick="this.nextElementSibling.textContent='0.55 (the state price q_Boom)'">Check</button>
+        <div class="feedback"></div>
+      </div>
+    </section>
+
+    <section class="module" id="m2">
+      <h2>Module 2: Synthetic replication sandbox</h2>
+      <div class="controls">
+        <label>Target
+          <select id="m2-target">
+            <option value="boom">AD_Boom (1,0)</option>
+            <option value="rec">AD_Rec (0,1)</option>
+            <option value="custom">Custom</option>
+          </select>
+        </label>
+        <label>w_S <input type="range" id="m2-ws" min="-1" max="1" step="0.001" value="0.01667"></label>
+        <label>w_B <input type="range" id="m2-wb" min="-1" max="1" step="0.001" value="-0.01"></label>
+        <button id="m2-auto">Auto-solve</button>
+      </div>
+      <div id="m2-out"></div>
+      <details>
+        <summary>But Why? Why can't I buy an AD security on the NYSE?</summary>
+        <div>Markets are incomplete: we do not trade a pure state-contingent claim for every possible future. Breeden-Litzenberger shows that the second derivative of option prices with respect to strike recovers the state-price density, so digital options are approximate real-world substitutes. Short positions are legitimate because they are just negative holdings of existing assets; no new securities are created.</div>
+      </details>
+    </section>
+
+    <section class="module" id="m3">
+      <h2>Module 3: The disappearing-probability paradox</h2>
+      <div class="controls">
+        <label>π_Boom <input type="range" id="m3-pi" min="0.05" max="0.95" step="0.01" value="0.80"></label>
+        <label>Risk aversion γ <input type="range" id="m3-gamma" min="0" max="10" step="0.1" value="2"></label>
+        <label>Discount β <input type="number" id="m3-beta" value="0.97" step="0.01"></label>
+        <label>c_Boom <input type="number" id="m3-cb" value="1.2" step="0.1"></label>
+        <label>c_Rec <input type="number" id="m3-cr" value="0.8" step="0.1"></label>
+        <label><input type="checkbox" id="m3-fix"> Fix market prices (canonical q)</label>
+      </div>
+      <div id="m3-chart" class="chart"></div>
+      <div id="m3-out"></div>
+      <details>
+        <summary>But Why? Why did P vanish from the pricing formula?</summary>
+        <div>When prices are fixed by the market, the state prices q are determined by the traded assets. The real-world probabilities π only appear inside the SDF m = q/π. Once q is known, the pricing formula Σ q_s x_s no longer needs π. Risk-neutral probabilities are a pricing device, not a belief.</div>
+      </details>
+    </section>
+
+    <section class="module" id="m4">
+      <h2>Module 4: Complete vs. incomplete markets</h2>
+      <div id="m4-chart" class="chart chart-3d"></div>
+      <button id="m4-put">+ Introduce Put (K=80)</button>
+      <div id="m4-out"></div>
+      <details>
+        <summary>But Why? Why can't I hedge crash risk with only stock and bond?</summary>
+        <div>Stock and bond span only a 2-dimensional plane inside 3-dimensional state space. The pure crash claim (0,0,1) lies off that plane, so it cannot be replicated. Adding an independent put raises rank(X) to 3 and collapses the set of state prices to a single point.</div>
+      </details>
+    </section>
+
+    <section class="module" id="m5">
+      <h2>Module 5: From discrete states to continuous curves</h2>
+      <label>Number of states N
+        <select id="m5-n">
+          <option>2</option><option>5</option><option>10</option><option>20</option>
+          <option selected>50</option><option>200</option><option>∞</option>
+        </select>
+      </label>
+      <div id="m5-chart" class="chart"></div>
+      <div id="m5-out"></div>
+      <details>
+        <summary>But Why? Why sums become integrals?</summary>
+        <div>As N → ∞ the equal-probability bins become a continuous density. The Radon-Nikodym derivative dQ/dP is exactly the continuous analogue of m_s = q_s / π_s. The state-price density itself is not a probability; it is the product of the probability density and the SDF.</div>
+      </details>
+    </section>
+
+    <section class="module" id="m6">
+      <h2>Module 6: The Fundamental Theorem of Asset Pricing</h2>
+      <div id="m6-out"></div>
+      <details>
+        <summary>But Why? Why does positivity of q equal absence of free lunches?</summary>
+        <div>A strictly positive state-price vector is a separating hyperplane between the set of free lunches and the positive orthant. If no such hyperplane exists, there is a portfolio with non-positive cost and non-negative payoff in every state (with at least one strict inequality). Uniqueness of that vector is equivalent to rank(X) = S, i.e., completeness.</div>
+      </details>
+    </section>
+  </main>
+
+  <footer>
+    <div class="credit-icons">
+      <a href="mailto:bestofprakhar@gmail.com" title="Email" aria-label="Email Prakhar Gupta">✉️</a>
+      <a href="https://www.linkedin.com/in/prakhar-gupta-5b7250372" target="_blank" rel="noopener" title="LinkedIn" aria-label="LinkedIn">in</a>
+      <a href="https://x.com/prakharquant" target="_blank" rel="noopener" title="Twitter / X" aria-label="Twitter">𝕏</a>
+    </div>
+    <p>Created by <strong>Prakhar Gupta</strong> · Interactive teaching site on Arrow-Debreu securities and FTAP</p>
+    <p class="muted">Open index.html locally or deploy via GitHub Pages (Settings → Pages → Deploy from branch → main / root).</p>
+  </footer>
+
+  <script src="app.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      if (window.renderMathInElement) {
+        renderMathInElement(document.body, { delimiters: [{ left: "$$", right: "$$", display: true }, { left: "$", right: "$", display: false }] });
+      }
+    });
+  </script>
+</body>
+</html>
